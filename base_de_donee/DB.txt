@@ -1,0 +1,897 @@
+CREATE DATABASE IF NOT EXISTS hopital_compta_local
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE hopital_compta_local;
+
+-- ═══════════════════════════════════════════════════════════════
+-- FICHIER : hopital_compta_structure.sql
+-- PROJET  : Gestion Comptabilité - Hôpital Provincial Nord-Kivu
+-- DATE    : 2024
+-- VERSION : 1.0
+-- ═══════════════════════════════════════════════════════════════
+
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+SET time_zone = "+02:00"; -- Fuseau horaire Kinshasa (CAT)
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
+-- ───────────────────────────────────────────────────────────────
+-- DÉSACTIVER LES CONTRAINTES POUR L'IMPORT
+-- ───────────────────────────────────────────────────────────────
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- ══════════════════════════════════════════════════════════════
+-- 1. TABLE : roles
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `roles` (
+    `id`          INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `nom`         VARCHAR(50)   NOT NULL,
+    `description` TEXT,
+    `niveau`      TINYINT(1)    NOT NULL DEFAULT 0,
+    `is_active`   TINYINT(1)   NOT NULL DEFAULT 1,
+    `created_at`  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
+                                ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_roles_nom` (`nom`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Rôles des utilisateurs du système';
+
+-- ══════════════════════════════════════════════════════════════
+-- 2. TABLE : permissions
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `permissions` (
+    `id`          INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `module`      VARCHAR(50)   NOT NULL,
+    `action`      VARCHAR(50)   NOT NULL,
+    `description` VARCHAR(200),
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_module_action` (`module`, `action`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 3. TABLE : role_permissions
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `role_permissions` (
+    `role_id`       INT UNSIGNED NOT NULL,
+    `permission_id` INT UNSIGNED NOT NULL,
+    PRIMARY KEY (`role_id`, `permission_id`),
+    CONSTRAINT `fk_rp_role`
+        FOREIGN KEY (`role_id`)
+        REFERENCES `roles` (`id`)
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_rp_permission`
+        FOREIGN KEY (`permission_id`)
+        REFERENCES `permissions` (`id`)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 4. TABLE : services
+-- (déclarée avant users car users y fait référence)
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `services` (
+    `id`             INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `nom`            VARCHAR(100)  NOT NULL,
+    `code`           VARCHAR(10)   NOT NULL,
+    `type`           ENUM('MEDICAL','ADMINISTRATIF',
+                          'TECHNIQUE','PARAMEDICAL') NOT NULL,
+    `responsable_id` INT UNSIGNED,
+    `budget_annuel`  DECIMAL(15,2),
+    `is_active`      TINYINT(1)    NOT NULL DEFAULT 1,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_services_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 5. TABLE : users
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `users` (
+    `id`              INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `role_id`         INT UNSIGNED  NOT NULL,
+    `service_id`      INT UNSIGNED,
+    `matricule`       VARCHAR(20)   NOT NULL,
+    `nom`             VARCHAR(100)  NOT NULL,
+    `prenom`          VARCHAR(100)  NOT NULL,
+    `email`           VARCHAR(150)  NOT NULL,
+    `telephone`       VARCHAR(20),
+    `password_hash`   VARCHAR(255)  NOT NULL,
+    `avatar_url`      VARCHAR(255),
+    `is_active`       TINYINT(1)    NOT NULL DEFAULT 1,
+    `must_change_pwd` TINYINT(1)    NOT NULL DEFAULT 1,
+    `last_login`      TIMESTAMP     NULL,
+    `failed_attempts` TINYINT       NOT NULL DEFAULT 0,
+    `locked_until`    TIMESTAMP     NULL,
+    `created_by`      INT UNSIGNED,
+    `created_at`      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
+                                    ON UPDATE CURRENT_TIMESTAMP,
+    `deleted_at`      TIMESTAMP     NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_users_matricule` (`matricule`),
+    UNIQUE KEY `uk_users_email`     (`email`),
+    KEY `idx_users_role`            (`role_id`),
+    KEY `idx_users_service`         (`service_id`),
+    CONSTRAINT `fk_users_role`
+        FOREIGN KEY (`role_id`)
+        REFERENCES `roles` (`id`),
+    CONSTRAINT `fk_users_service`
+        FOREIGN KEY (`service_id`)
+        REFERENCES `services` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_users_created_by`
+        FOREIGN KEY (`created_by`)
+        REFERENCES `users` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Mise à jour FK services.responsable_id maintenant que users existe
+ALTER TABLE `services`
+    ADD CONSTRAINT `fk_services_responsable`
+    FOREIGN KEY (`responsable_id`)
+    REFERENCES `users` (`id`)
+    ON DELETE SET NULL;
+
+-- ══════════════════════════════════════════════════════════════
+-- 6. TABLE : sessions
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `sessions` (
+    `id`            VARCHAR(128)  NOT NULL,
+    `user_id`       INT UNSIGNED  NOT NULL,
+    `token_hash`    VARCHAR(255)  NOT NULL,
+    `refresh_token` VARCHAR(255),
+    `device_info`   JSON,
+    `ip_address`    VARCHAR(45),
+    `expires_at`    TIMESTAMP     NOT NULL,
+    `created_at`    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_sessions_user`   (`user_id`),
+    KEY `idx_sessions_expire` (`expires_at`),
+    CONSTRAINT `fk_sessions_user`
+        FOREIGN KEY (`user_id`)
+        REFERENCES `users` (`id`)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 7. TABLE : audit_logs
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `audit_logs` (
+    `id`                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id`           INT UNSIGNED,
+    `session_id`        VARCHAR(128),
+    `action`            VARCHAR(100)    NOT NULL,
+    `table_cible`       VARCHAR(50),
+    `enregistrement_id` BIGINT UNSIGNED,
+    `anciennes_valeurs` JSON,
+    `nouvelles_valeurs` JSON,
+    `ip_address`        VARCHAR(45),
+    `statut`            ENUM('SUCCESS','FAILURE','WARNING')
+                        DEFAULT 'SUCCESS',
+    `created_at`        TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_audit_user`    (`user_id`),
+    KEY `idx_audit_action`  (`action`),
+    KEY `idx_audit_created` (`created_at`),
+    CONSTRAINT `fk_audit_user`
+        FOREIGN KEY (`user_id`)
+        REFERENCES `users` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 8. TABLE : exercices_fiscaux
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `exercices_fiscaux` (
+    `id`          INT UNSIGNED   NOT NULL AUTO_INCREMENT,
+    `annee`       YEAR           NOT NULL,
+    `date_debut`  DATE           NOT NULL,
+    `date_fin`    DATE           NOT NULL,
+    `statut`      ENUM('OUVERT','CLOTURE_TEMP','CLOTURE_DEF')
+                  DEFAULT 'OUVERT',
+    `cloture_par` INT UNSIGNED,
+    `cloture_le`  TIMESTAMP      NULL,
+    `created_at`  TIMESTAMP      DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_exercice_annee` (`annee`),
+    CONSTRAINT `fk_exercice_cloture`
+        FOREIGN KEY (`cloture_par`)
+        REFERENCES `users` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 9. TABLE : plan_comptable
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `plan_comptable` (
+    `id`             INT UNSIGNED   NOT NULL AUTO_INCREMENT,
+    `numero_compte`  VARCHAR(20)    NOT NULL,
+    `libelle`        VARCHAR(200)   NOT NULL,
+    `classe`         TINYINT(1)     NOT NULL,
+    `type_compte`    ENUM('ACTIF','PASSIF','CHARGE',
+                          'PRODUIT','BILAN') NOT NULL,
+    `sens_normal`    ENUM('DEBIT','CREDIT') NOT NULL,
+    `compte_parent`  VARCHAR(20),
+    `is_analytique`  TINYINT(1)     DEFAULT 0,
+    `is_active`      TINYINT(1)     DEFAULT 1,
+    `created_by`     INT UNSIGNED   NOT NULL,
+    `created_at`     TIMESTAMP      DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_plan_numero` (`numero_compte`),
+    KEY `idx_plan_classe` (`classe`),
+    KEY `idx_plan_type`   (`type_compte`),
+    CONSTRAINT `fk_plan_created_by`
+        FOREIGN KEY (`created_by`)
+        REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Plan comptable SYSCOHADA Révisé';
+
+-- ══════════════════════════════════════════════════════════════
+-- 10. TABLE : journaux
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `journaux` (
+    `id`             INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `code`           VARCHAR(10)   NOT NULL,
+    `libelle`        VARCHAR(100)  NOT NULL,
+    `type`           ENUM('VENTE','ACHAT','BANQUE',
+                          'CAISSE','OD','SALAIRE') NOT NULL,
+    `compte_defaut`  VARCHAR(20),
+    `is_active`      TINYINT(1)   DEFAULT 1,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_journaux_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 11. TABLE : ecritures_comptables
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `ecritures_comptables` (
+    `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `exercice_id`     INT UNSIGNED    NOT NULL,
+    `journal_id`      INT UNSIGNED    NOT NULL,
+    `numero_piece`    VARCHAR(30)     NOT NULL,
+    `date_ecriture`   DATE            NOT NULL,
+    `date_valeur`     DATE,
+    `libelle`         VARCHAR(255)    NOT NULL,
+    `statut`          ENUM('BROUILLON','SOUMIS','VALIDE',
+                           'REJETE','ANNULE') DEFAULT 'BROUILLON',
+    `saisi_par`       INT UNSIGNED    NOT NULL,
+    `valide_par`      INT UNSIGNED,
+    `valide_le`       TIMESTAMP       NULL,
+    `motif_rejet`     TEXT,
+    `piece_jointe_url` VARCHAR(255),
+    `reference_ext`   VARCHAR(100),
+    `created_at`      TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`      TIMESTAMP       DEFAULT CURRENT_TIMESTAMP
+                                      ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_num_piece` (`exercice_id`, `journal_id`,
+                                `numero_piece`),
+    KEY `idx_ecrit_date`   (`date_ecriture`),
+    KEY `idx_ecrit_statut` (`statut`),
+    CONSTRAINT `fk_ecrit_exercice`
+        FOREIGN KEY (`exercice_id`)
+        REFERENCES `exercices_fiscaux` (`id`),
+    CONSTRAINT `fk_ecrit_journal`
+        FOREIGN KEY (`journal_id`)
+        REFERENCES `journaux` (`id`),
+    CONSTRAINT `fk_ecrit_saisi`
+        FOREIGN KEY (`saisi_par`)
+        REFERENCES `users` (`id`),
+    CONSTRAINT `fk_ecrit_valide`
+        FOREIGN KEY (`valide_par`)
+        REFERENCES `users` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 12. TABLE : lignes_ecriture
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `lignes_ecriture` (
+    `id`           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `ecriture_id`  BIGINT UNSIGNED NOT NULL,
+    `compte_id`    INT UNSIGNED    NOT NULL,
+    `libelle`      VARCHAR(255),
+    `debit`        DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
+    `credit`       DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
+    `devise`       CHAR(3)         DEFAULT 'CDF',
+    `taux_change`  DECIMAL(10,4)   DEFAULT 1.0000,
+    `ordre`        TINYINT         NOT NULL DEFAULT 1,
+    PRIMARY KEY (`id`),
+    KEY `idx_ligne_compte` (`compte_id`),
+    KEY `idx_ligne_ecrit`  (`ecriture_id`),
+    CONSTRAINT `fk_ligne_ecriture`
+        FOREIGN KEY (`ecriture_id`)
+        REFERENCES `ecritures_comptables` (`id`)
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_ligne_compte`
+        FOREIGN KEY (`compte_id`)
+        REFERENCES `plan_comptable` (`id`),
+    CONSTRAINT `chk_debit_credit`
+        CHECK (
+            (`debit` > 0 AND `credit` = 0) OR
+            (`credit` > 0 AND `debit` = 0) OR
+            (`debit` = 0 AND `credit` = 0)
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 13. TABLE : budgets
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `budgets` (
+    `id`              INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `exercice_id`     INT UNSIGNED  NOT NULL,
+    `service_id`      INT UNSIGNED  NOT NULL,
+    `compte_id`       INT UNSIGNED  NOT NULL,
+    `montant_prevu`   DECIMAL(15,2) NOT NULL,
+    `description`     TEXT,
+    `statut`          ENUM('DRAFT','SOUMIS','APPROUVE','REJETE')
+                      DEFAULT 'DRAFT',
+    `soumis_par`      INT UNSIGNED  NOT NULL,
+    `approuve_par`    INT UNSIGNED,
+    `approuve_le`     TIMESTAMP     NULL,
+    `created_at`      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_budget_esc` (`exercice_id`,`service_id`,`compte_id`),
+    CONSTRAINT `fk_budget_exercice`
+        FOREIGN KEY (`exercice_id`)
+        REFERENCES `exercices_fiscaux` (`id`),
+    CONSTRAINT `fk_budget_service`
+        FOREIGN KEY (`service_id`)
+        REFERENCES `services` (`id`),
+    CONSTRAINT `fk_budget_compte`
+        FOREIGN KEY (`compte_id`)
+        REFERENCES `plan_comptable` (`id`),
+    CONSTRAINT `fk_budget_soumis`
+        FOREIGN KEY (`soumis_par`)
+        REFERENCES `users` (`id`),
+    CONSTRAINT `fk_budget_approuve`
+        FOREIGN KEY (`approuve_par`)
+        REFERENCES `users` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 14. TABLE : comptes_bancaires
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `comptes_bancaires` (
+    `id`              INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `nom_banque`      VARCHAR(100)  NOT NULL,
+    `numero_compte`   VARCHAR(50)   NOT NULL,
+    `iban`            VARCHAR(34),
+    `devise`          CHAR(3)       DEFAULT 'CDF',
+    `solde_initial`   DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    `solde_actuel`    DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    `compte_plan_id`  INT UNSIGNED  NOT NULL,
+    `is_active`       TINYINT(1)    DEFAULT 1,
+    `created_at`      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_comptes_bancaires_num` (`numero_compte`),
+    CONSTRAINT `fk_cptbk_plan`
+        FOREIGN KEY (`compte_plan_id`)
+        REFERENCES `plan_comptable` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 15. TABLE : mouvements_bancaires
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `mouvements_bancaires` (
+    `id`                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `compte_bancaire_id`  INT UNSIGNED    NOT NULL,
+    `ecriture_id`         BIGINT UNSIGNED,
+    `date_operation`      DATE            NOT NULL,
+    `date_valeur`         DATE,
+    `libelle`             VARCHAR(255)    NOT NULL,
+    `type`                ENUM('DEBIT','CREDIT') NOT NULL,
+    `montant`             DECIMAL(15,2)   NOT NULL,
+    `solde_apres`         DECIMAL(15,2)   NOT NULL,
+    `reference`           VARCHAR(100),
+    `is_rapproche`        TINYINT(1)      DEFAULT 0,
+    `rapproche_le`        TIMESTAMP       NULL,
+    `created_at`          TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_mvt_date`     (`date_operation`),
+    KEY `idx_mvt_rapproch` (`is_rapproche`),
+    CONSTRAINT `fk_mvtbk_compte`
+        FOREIGN KEY (`compte_bancaire_id`)
+        REFERENCES `comptes_bancaires` (`id`),
+    CONSTRAINT `fk_mvtbk_ecrit`
+        FOREIGN KEY (`ecriture_id`)
+        REFERENCES `ecritures_comptables` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 16. TABLE : caisses
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `caisses` (
+    `id`              INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `nom`             VARCHAR(100)  NOT NULL,
+    `service_id`      INT UNSIGNED,
+    `responsable_id`  INT UNSIGNED  NOT NULL,
+    `solde_actuel`    DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    `plafond`         DECIMAL(15,2) DEFAULT 500000.00,
+    `devise`          CHAR(3)       DEFAULT 'CDF',
+    `is_active`       TINYINT(1)    DEFAULT 1,
+    PRIMARY KEY (`id`),
+    CONSTRAINT `fk_caisse_service`
+        FOREIGN KEY (`service_id`)
+        REFERENCES `services` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_caisse_responsable`
+        FOREIGN KEY (`responsable_id`)
+        REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 17. TABLE : sessions_caisse
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `sessions_caisse` (
+    `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `caisse_id`       INT UNSIGNED    NOT NULL,
+    `caissier_id`     INT UNSIGNED    NOT NULL,
+    `date_session`    DATE            NOT NULL,
+    `solde_ouverture` DECIMAL(15,2)   NOT NULL,
+    `solde_fermeture` DECIMAL(15,2),
+    `heure_ouverture` TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    `heure_fermeture` TIMESTAMP       NULL,
+    `statut`          ENUM('OUVERTE','FERMEE','VALIDEE')
+                      DEFAULT 'OUVERTE',
+    PRIMARY KEY (`id`),
+    CONSTRAINT `fk_sc_caisse`
+        FOREIGN KEY (`caisse_id`)
+        REFERENCES `caisses` (`id`),
+    CONSTRAINT `fk_sc_caissier`
+        FOREIGN KEY (`caissier_id`)
+        REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 18. TABLE : transactions_caisse
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `transactions_caisse` (
+    `id`                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `session_id`         BIGINT UNSIGNED NOT NULL,
+    `ecriture_id`        BIGINT UNSIGNED,
+    `numero_recu`        VARCHAR(30)     NOT NULL,
+    `type`               ENUM('ENTREE','SORTIE') NOT NULL,
+    `motif`              VARCHAR(50)     NOT NULL,
+    `beneficiaire`       VARCHAR(150),
+    `montant`            DECIMAL(15,2)   NOT NULL,
+    `mode_paiement`      ENUM('ESPECES','MOBILE_MONEY',
+                              'CHEQUE','VIREMENT') DEFAULT 'ESPECES',
+    `reference_paiement` VARCHAR(100),
+    `observation`        TEXT,
+    `created_at`         TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_trans_recu` (`numero_recu`),
+    KEY `idx_trans_date` (`created_at`),
+    KEY `idx_trans_type` (`type`),
+    CONSTRAINT `fk_trans_session`
+        FOREIGN KEY (`session_id`)
+        REFERENCES `sessions_caisse` (`id`),
+    CONSTRAINT `fk_trans_ecrit`
+        FOREIGN KEY (`ecriture_id`)
+        REFERENCES `ecritures_comptables` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 19. TABLE : employes
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `employes` (
+    `id`              INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `user_id`         INT UNSIGNED,
+    `service_id`      INT UNSIGNED  NOT NULL,
+    `matricule`       VARCHAR(20)   NOT NULL,
+    `nom`             VARCHAR(100)  NOT NULL,
+    `prenom`          VARCHAR(100)  NOT NULL,
+    `date_naissance`  DATE,
+    `sexe`            ENUM('M','F'),
+    `nationalite`     VARCHAR(50)   DEFAULT 'Congolaise',
+    `numero_cnss`     VARCHAR(30),
+    `numero_inss`     VARCHAR(30),
+    `telephone`       VARCHAR(20),
+    `adresse`         TEXT,
+    `date_embauche`   DATE          NOT NULL,
+    `statut`          ENUM('ACTIF','SUSPENDU',
+                           'RETRAITE','DEMISSIONNE') DEFAULT 'ACTIF',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_employes_matricule` (`matricule`),
+    KEY `idx_emp_statut` (`statut`),
+    CONSTRAINT `fk_emp_user`
+        FOREIGN KEY (`user_id`)
+        REFERENCES `users` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_emp_service`
+        FOREIGN KEY (`service_id`)
+        REFERENCES `services` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 20. TABLE : contrats
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `contrats` (
+    `id`            INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `employe_id`    INT UNSIGNED  NOT NULL,
+    `type_contrat`  ENUM('CDI','CDD','STAGE','PRESTATION') NOT NULL,
+    `poste`         VARCHAR(100)  NOT NULL,
+    `categorie`     VARCHAR(50),
+    `salaire_base`  DECIMAL(12,2) NOT NULL,
+    `date_debut`    DATE          NOT NULL,
+    `date_fin`      DATE,
+    `is_actif`      TINYINT(1)   DEFAULT 1,
+    `signe_par`     INT UNSIGNED,
+    `created_at`    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    CONSTRAINT `fk_contrat_employe`
+        FOREIGN KEY (`employe_id`)
+        REFERENCES `employes` (`id`),
+    CONSTRAINT `fk_contrat_signe`
+        FOREIGN KEY (`signe_par`)
+        REFERENCES `users` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 21. TABLE : bulletins_salaire
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `bulletins_salaire` (
+    `id`               INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `employe_id`       INT UNSIGNED  NOT NULL,
+    `contrat_id`       INT UNSIGNED  NOT NULL,
+    `exercice_id`      INT UNSIGNED  NOT NULL,
+    `mois`             TINYINT(2)    NOT NULL,
+    `annee`            YEAR          NOT NULL,
+    `salaire_base`     DECIMAL(12,2) NOT NULL,
+    `prime_anciennete` DECIMAL(10,2) DEFAULT 0.00,
+    `prime_risque`     DECIMAL(10,2) DEFAULT 0.00,
+    `autres_primes`    DECIMAL(10,2) DEFAULT 0.00,
+    `total_brut`       DECIMAL(12,2) NOT NULL,
+    `cotis_cnss`       DECIMAL(10,2) DEFAULT 0.00,
+    `ipr`              DECIMAL(10,2) DEFAULT 0.00,
+    `avances_deduites` DECIMAL(10,2) DEFAULT 0.00,
+    `autres_retenues`  DECIMAL(10,2) DEFAULT 0.00,
+    `total_retenues`   DECIMAL(12,2) NOT NULL,
+    `net_a_payer`      DECIMAL(12,2) NOT NULL,
+    `statut`           ENUM('BROUILLON','VALIDE','PAYE')
+                       DEFAULT 'BROUILLON',
+    `ecriture_id`      BIGINT UNSIGNED,
+    `valide_par`       INT UNSIGNED,
+    `valide_le`        TIMESTAMP     NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_bulletin_mois` (`employe_id`, `mois`, `annee`),
+    CONSTRAINT `fk_bull_employe`
+        FOREIGN KEY (`employe_id`)
+        REFERENCES `employes` (`id`),
+    CONSTRAINT `fk_bull_contrat`
+        FOREIGN KEY (`contrat_id`)
+        REFERENCES `contrats` (`id`),
+    CONSTRAINT `fk_bull_exercice`
+        FOREIGN KEY (`exercice_id`)
+        REFERENCES `exercices_fiscaux` (`id`),
+    CONSTRAINT `fk_bull_ecriture`
+        FOREIGN KEY (`ecriture_id`)
+        REFERENCES `ecritures_comptables` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_bull_valide`
+        FOREIGN KEY (`valide_par`)
+        REFERENCES `users` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 22. TABLE : avances_salaire
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `avances_salaire` (
+    `id`                 INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `employe_id`         INT UNSIGNED  NOT NULL,
+    `montant`            DECIMAL(10,2) NOT NULL,
+    `date_demande`       DATE          NOT NULL,
+    `motif`              TEXT,
+    `statut`             ENUM('EN_ATTENTE','APPROUVE',
+                              'REJETE','REMBOURSE') DEFAULT 'EN_ATTENTE',
+    `approuve_par`       INT UNSIGNED,
+    `approuve_le`        TIMESTAMP     NULL,
+    `date_remboursement` DATE,
+    `ecriture_id`        BIGINT UNSIGNED,
+    PRIMARY KEY (`id`),
+    CONSTRAINT `fk_avance_employe`
+        FOREIGN KEY (`employe_id`)
+        REFERENCES `employes` (`id`),
+    CONSTRAINT `fk_avance_approuve`
+        FOREIGN KEY (`approuve_par`)
+        REFERENCES `users` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_avance_ecrit`
+        FOREIGN KEY (`ecriture_id`)
+        REFERENCES `ecritures_comptables` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 23. TABLE : categories_produits
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `categories_produits` (
+    `id`        INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `nom`       VARCHAR(100) NOT NULL,
+    `type`      ENUM('MEDICAMENT','MATERIEL',
+                     'CONSOMMABLE','AUTRE') NOT NULL,
+    `parent_id` INT UNSIGNED,
+    PRIMARY KEY (`id`),
+    CONSTRAINT `fk_catprod_parent`
+        FOREIGN KEY (`parent_id`)
+        REFERENCES `categories_produits` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 24. TABLE : produits
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `produits` (
+    `id`              INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `categorie_id`    INT UNSIGNED  NOT NULL,
+    `code`            VARCHAR(30)   NOT NULL,
+    `designation`     VARCHAR(200)  NOT NULL,
+    `unite_mesure`    VARCHAR(20)   NOT NULL,
+    `stock_actuel`    DECIMAL(10,3) NOT NULL DEFAULT 0.000,
+    `stock_minimum`   DECIMAL(10,3) NOT NULL DEFAULT 0.000,
+    `stock_maximum`   DECIMAL(10,3),
+    `prix_unitaire`   DECIMAL(10,2),
+    `compte_plan_id`  INT UNSIGNED,
+    `is_active`       TINYINT(1)    DEFAULT 1,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_produits_code` (`code`),
+    CONSTRAINT `fk_prod_categorie`
+        FOREIGN KEY (`categorie_id`)
+        REFERENCES `categories_produits` (`id`),
+    CONSTRAINT `fk_prod_plan`
+        FOREIGN KEY (`compte_plan_id`)
+        REFERENCES `plan_comptable` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 25. TABLE : fournisseurs
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `fournisseurs` (
+    `id`                   INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `nom`                  VARCHAR(150) NOT NULL,
+    `numero_rccm`          VARCHAR(50),
+    `numero_impot`         VARCHAR(50),
+    `telephone`            VARCHAR(20),
+    `email`                VARCHAR(150),
+    `adresse`              TEXT,
+    `conditions_paiement`  INT          DEFAULT 30,
+    `compte_plan_id`       INT UNSIGNED,
+    `is_active`            TINYINT(1)   DEFAULT 1,
+    PRIMARY KEY (`id`),
+    CONSTRAINT `fk_fourn_plan`
+        FOREIGN KEY (`compte_plan_id`)
+        REFERENCES `plan_comptable` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 26. TABLE : mouvements_stock
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `mouvements_stock` (
+    `id`               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `produit_id`       INT UNSIGNED    NOT NULL,
+    `type`             ENUM('ENTREE','SORTIE',
+                            'AJUSTEMENT','TRANSFERT') NOT NULL,
+    `motif`            VARCHAR(100)    NOT NULL,
+    `quantite`         DECIMAL(10,3)   NOT NULL,
+    `prix_unitaire`    DECIMAL(10,2),
+    `stock_avant`      DECIMAL(10,3)   NOT NULL,
+    `stock_apres`      DECIMAL(10,3)   NOT NULL,
+    `date_mouvement`   DATE            NOT NULL,
+    `date_peremption`  DATE,
+    `numero_lot`       VARCHAR(50),
+    `ecriture_id`      BIGINT UNSIGNED,
+    `enregistre_par`   INT UNSIGNED    NOT NULL,
+    `created_at`       TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_mvtst_date`    (`date_mouvement`),
+    KEY `idx_mvtst_produit` (`produit_id`),
+    CONSTRAINT `fk_mvtst_produit`
+        FOREIGN KEY (`produit_id`)
+        REFERENCES `produits` (`id`),
+    CONSTRAINT `fk_mvtst_ecrit`
+        FOREIGN KEY (`ecriture_id`)
+        REFERENCES `ecritures_comptables` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_mvtst_user`
+        FOREIGN KEY (`enregistre_par`)
+        REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 27. TABLE : tarifs_actes
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `tarifs_actes` (
+    `id`                INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    `code_acte`         VARCHAR(30)   NOT NULL,
+    `designation`       VARCHAR(200)  NOT NULL,
+    `service_id`        INT UNSIGNED,
+    `montant`           DECIMAL(10,2) NOT NULL,
+    `devise`            CHAR(3)       DEFAULT 'CDF',
+    `compte_produit_id` INT UNSIGNED,
+    `is_active`         TINYINT(1)    DEFAULT 1,
+    `valide_du`         DATE,
+    `valide_au`         DATE,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tarifs_code` (`code_acte`),
+    CONSTRAINT `fk_tarif_service`
+        FOREIGN KEY (`service_id`)
+        REFERENCES `services` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_tarif_plan`
+        FOREIGN KEY (`compte_produit_id`)
+        REFERENCES `plan_comptable` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 28. TABLE : factures
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `factures` (
+    `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `numero`          VARCHAR(30)     NOT NULL,
+    `type`            ENUM('CLIENT','FOURNISSEUR','AVOIR') NOT NULL,
+    `date_facture`    DATE            NOT NULL,
+    `date_echeance`   DATE,
+    `patient_ref`     VARCHAR(50),
+    `nom_client`      VARCHAR(200)    NOT NULL,
+    `fournisseur_id`  INT UNSIGNED,
+    `montant_ht`      DECIMAL(12,2)   NOT NULL DEFAULT 0.00,
+    `taux_tva`        DECIMAL(5,2)    DEFAULT 0.00,
+    `montant_tva`     DECIMAL(12,2)   DEFAULT 0.00,
+    `montant_ttc`     DECIMAL(12,2)   NOT NULL,
+    `montant_paye`    DECIMAL(12,2)   DEFAULT 0.00,
+    `statut`          ENUM('BROUILLON','EMISE',
+                           'PARTIELLEMENT_PAYEE','PAYEE',
+                           'ANNULEE','CONTENTIEUX') DEFAULT 'EMISE',
+    `ecriture_id`     BIGINT UNSIGNED,
+    `cree_par`        INT UNSIGNED    NOT NULL,
+    `created_at`      TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_factures_num` (`numero`),
+    KEY `idx_fact_date`   (`date_facture`),
+    KEY `idx_fact_statut` (`statut`),
+    CONSTRAINT `fk_fact_fourn`
+        FOREIGN KEY (`fournisseur_id`)
+        REFERENCES `fournisseurs` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_fact_ecrit`
+        FOREIGN KEY (`ecriture_id`)
+        REFERENCES `ecritures_comptables` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_fact_user`
+        FOREIGN KEY (`cree_par`)
+        REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ══════════════════════════════════════════════════════════════
+-- 29. TABLE : lignes_facture
+-- ══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS `lignes_facture` (
+    `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `facture_id`     BIGINT UNSIGNED NOT NULL,
+    `tarif_acte_id`  INT UNSIGNED,
+    `produit_id`     INT UNSIGNED,
+    `designation`    VARCHAR(200)    NOT NULL,
+    `quantite`       DECIMAL(10,3)   NOT NULL DEFAULT 1.000,
+    `prix_unitaire`  DECIMAL(10,2)   NOT NULL,
+    `remise_pct`     DECIMAL(5,2)    DEFAULT 0.00,
+    PRIMARY KEY (`id`),
+    CONSTRAINT `fk_lf_facture`
+        FOREIGN KEY (`facture_id`)
+        REFERENCES `factures` (`id`)
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_lf_tarif`
+        FOREIGN KEY (`tarif_acte_id`)
+        REFERENCES `tarifs_actes` (`id`)
+        ON DELETE SET NULL,
+    CONSTRAINT `fk_lf_produit`
+        FOREIGN KEY (`produit_id`)
+        REFERENCES `produits` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ═══════════════════════════════════════════════════════════════
+-- DONNÉES INITIALES (Seed Data)
+-- ═══════════════════════════════════════════════════════════════
+
+-- ─── Rôles ────────────────────────────────────────────────────
+INSERT INTO `roles` (`nom`, `description`, `niveau`) VALUES
+('SUPER_ADMIN',      'Administrateur système — accès total',          10),
+('DIRECTEUR',        'Directeur Général — approbation et rapports',    8),
+('CHEF_COMPTABLE',   'Chef Comptable — supervision comptabilité',       7),
+('AUDITEUR',         'Auditeur Interne — lecture seule + rapports',    5),
+('COMPTABLE',        'Comptable — saisie des écritures',              4),
+('CAISSIER',         'Caissier — gestion caisse journalière',          3),
+('GESTIONNAIRE_STOCK','Gestionnaire Stock — inventaire approvisionnement',2);
+
+-- ─── Permissions ──────────────────────────────────────────────
+INSERT INTO `permissions` (`module`, `action`, `description`) VALUES
+-- Utilisateurs
+('users',         'create',   'Créer un utilisateur'),
+('users',         'read',     'Consulter les utilisateurs'),
+('users',         'update',   'Modifier un utilisateur'),
+('users',         'delete',   'Supprimer un utilisateur'),
+-- Comptabilité
+('comptabilite',  'create',   'Créer une écriture'),
+('comptabilite',  'read',     'Consulter les écritures'),
+('comptabilite',  'update',   'Modifier une écriture'),
+('comptabilite',  'validate', 'Valider une écriture'),
+-- Caisse
+('caisse',        'create',   'Créer une transaction'),
+('caisse',        'read',     'Consulter la caisse'),
+('caisse',        'close',    'Clôturer la caisse'),
+-- Budget
+('budget',        'create',   'Créer un budget'),
+('budget',        'read',     'Consulter les budgets'),
+('budget',        'approve',  'Approuver un budget'),
+-- Paie
+('paie',          'create',   'Créer un bulletin'),
+('paie',          'read',     'Consulter les bulletins'),
+('paie',          'validate', 'Valider les bulletins'),
+-- Stock
+('stock',         'create',   'Créer un mouvement stock'),
+('stock',         'read',     'Consulter le stock'),
+('stock',         'update',   'Modifier le stock'),
+-- Rapports
+('rapports',      'read',     'Consulter les rapports'),
+('rapports',      'export',   'Exporter les rapports'),
+-- Audit
+('audit',         'read',     'Consulter les logs d audit'),
+('audit',         'export',   'Exporter les logs d audit');
+
+-- ─── Journaux comptables standards ────────────────────────────
+INSERT INTO `journaux` (`code`, `libelle`, `type`) VALUES
+('VT',  'Journal des Ventes',              'VENTE'),
+('AC',  'Journal des Achats',              'ACHAT'),
+('BQ1', 'Journal Banque Principal',        'BANQUE'),
+('CA',  'Journal de Caisse',               'CAISSE'),
+('OD',  'Journal des Opérations Diverses', 'OD'),
+('PA',  'Journal de Paie',                 'SALAIRE');
+
+-- ─── Services hospitaliers ─────────────────────────────────────
+INSERT INTO `services` (`nom`, `code`, `type`) VALUES
+('Direction Générale',          'DG',   'ADMINISTRATIF'),
+('Comptabilité & Finances',     'CPT',  'ADMINISTRATIF'),
+('Médecine Interne',            'MED',  'MEDICAL'),
+('Chirurgie',                   'CHI',  'MEDICAL'),
+('Maternité',                   'MAT',  'MEDICAL'),
+('Pharmacie',                   'PHA',  'PARAMEDICAL'),
+('Laboratoire',                 'LAB',  'PARAMEDICAL'),
+('Radiologie',                  'RAD',  'TECHNIQUE'),
+('Urgences',                    'URG',  'MEDICAL'),
+('Ressources Humaines',         'RH',   'ADMINISTRATIF'),
+('Approvisionnement & Stock',   'STK',  'ADMINISTRATIF');
+
+-- ─── Exercice fiscal courant ───────────────────────────────────
+INSERT INTO `exercices_fiscaux` (`annee`, `date_debut`, `date_fin`, `statut`)
+VALUES (YEAR(CURDATE()), 
+        CONCAT(YEAR(CURDATE()), '-01-01'),
+        CONCAT(YEAR(CURDATE()), '-12-31'),
+        'OUVERT');
+
+-- ─── Super Admin par défaut ────────────────────────────────────
+-- ⚠️ CHANGE CE MOT DE PASSE IMMÉDIATEMENT APRÈS LE 1ER LOGIN !
+-- Hash bcrypt de : Admin@HopNK2024!
+INSERT INTO `users` (
+    `role_id`, `service_id`, `matricule`, `nom`, `prenom`,
+    `email`, `password_hash`, `is_active`, `must_change_pwd`
+) VALUES (
+    1, 1, 'ADM-001', 'ADMINISTRATEUR', 'Système',
+    'admin@hopital-nk.cd',
+    '$2y$12$YourBcryptHashHere',  -- À remplacer !
+    1, 1
+);
+
+-- ─── Réactiver les contraintes ────────────────────────────────
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- ════════════════════════════════════════════════════════════════
+-- FIN DU SCRIPT — hopital_compta_structure.sql
+-- ════════════════════════════════════════════════════════════════
