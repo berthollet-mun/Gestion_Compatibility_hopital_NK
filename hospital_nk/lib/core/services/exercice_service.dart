@@ -34,7 +34,7 @@ class ExerciceService {
   Future<Map<String, dynamic>> cloturerExercice(int id, {String? commentaire}) async {
     try {
       final response = await _api.put('/exercices/$id/cloturer', data: {
-        if (commentaire != null) 'commentaire': commentaire,
+        'commentaire': ?commentaire,
       });
       return response.data;
     } catch (e) {

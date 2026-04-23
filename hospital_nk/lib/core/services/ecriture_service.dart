@@ -61,7 +61,7 @@ class EcritureService {
   Future<Map<String, dynamic>> soumettreEcriture(int id, {String? commentaire}) async {
     try {
       final response = await _api.put('/ecritures/$id/soumettre', data: {
-        if (commentaire != null) 'commentaire': commentaire,
+        'commentaire': ?commentaire,
       });
       return response.data;
     } catch (e) {
@@ -72,7 +72,7 @@ class EcritureService {
   Future<Map<String, dynamic>> validerEcriture(int id, {String? commentaire}) async {
     try {
       final response = await _api.put('/ecritures/$id/valider', data: {
-        if (commentaire != null) 'commentaire': commentaire,
+        'commentaire': ?commentaire,
       });
       return response.data;
     } catch (e) {

@@ -53,7 +53,7 @@ class BudgetService {
   Future<Map<String, dynamic>> approuverBudget(int id, {String? commentaire}) async {
     try {
       final response = await _api.put('/budgets/$id/approuver', data: {
-        if (commentaire != null) 'commentaire': commentaire,
+        'commentaire': ?commentaire,
       });
       return response.data;
     } catch (e) {

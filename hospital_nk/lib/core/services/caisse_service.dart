@@ -28,7 +28,7 @@ class CaisseService {
       final response = await _api.post('/caisse/ouvrir', data: {
         'solde_ouverture': soldeOuverture,
         'devise': devise,
-        if (commentaire != null) 'commentaire': commentaire,
+        'commentaire': ?commentaire,
       });
       return response.data;
     } catch (e) {
@@ -44,7 +44,7 @@ class CaisseService {
     try {
       final response = await _api.put('/caisse/sessions/$sessionId/fermer', data: {
         'solde_reel': soldeReel,
-        if (commentaire != null) 'commentaire': commentaire,
+        'commentaire': ?commentaire,
       });
       return response.data;
     } catch (e) {

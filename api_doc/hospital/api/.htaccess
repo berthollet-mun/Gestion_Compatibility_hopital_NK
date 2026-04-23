@@ -1,0 +1,43 @@
+# Désactiver l'affichage des répertoires
+Options -Indexes
+Options +FollowSymLinks
+
+# Activer le moteur de réécriture
+RewriteEngine On
+RewriteBase /hospital/api/
+
+# Passer l'en-tête Authorization à PHP (souvent supprimé par Apache)
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Bloquer l'accès aux fichiers sensibles
+<FilesMatch "^\.env$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Forcer le type de contenu JSON pour les requêtes API
+<IfModule mod_headers.c>
+    # CORS Headers
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, Accept"
+    Header always set Access-Control-Max-Age "86400"
+    Header always set Content-Type "application/json; charset=UTF-8"
+    Header always set X-Content-Type-Options "nosniff"
+</IfModule>
+
+# Répondre directement aux requêtes OPTIONS (preflight CORS)
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^ index.php [QSA,L]
+
+# Si le fichier ou répertoire existe physiquement, le servir tel quel
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Tout rediriger vers index.php
+RewriteRule ^(.*)$ index.php [QSA,L]
+
+# Désactiver les erreurs PHP visibles (éviter le HTML d'erreur)
+php_flag display_errors Off
+php_flag log_errors On
